@@ -1,8 +1,11 @@
 """Shared firmware constants."""
 
+
 # Boot role select
 BOOT_SELECT_PIN = 4
 BOOT_SELECT_PULL = "up"  # "up" or "down"
+# True means high pin level boots central module. False means low boots central.
+BOOT_HIGH_IS_CENTRAL = True
 
 # Entry module paths (module containing a ``main()`` callable)
 CENTRAL_ENTRY_MODULE = "central_module.main"

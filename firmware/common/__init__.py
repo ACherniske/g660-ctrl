@@ -1,31 +1,43 @@
 """Shared code and constants for firmware modules."""
 
 from common.constants import (
-    # Boot role select
-	BOOT_SELECT_PIN,
-	BOOT_SELECT_PULL,
-	CENTRAL_ENTRY_MODULE,
-	DIFF_ENTRY_MODULE,
-
-    # Node IDs on the control network
+    BOOT_HIGH_IS_CENTRAL,
+    BOOT_SELECT_PIN,
+    BOOT_SELECT_PULL,
+    CENTRAL_ENTRY_MODULE,
+    DIFF_ENTRY_MODULE,
+    FRAME_SOF,
+    MAX_PAYLOAD_SIZE,
+    CMD_HEARTBEAT,
+    CMD_SET_MODE,
     NODE_ID_CENTRAL,
     NODE_ID_DIFF_FRONT,
     NODE_ID_DIFF_REAR,
-
-    # UART link defaults
+    NODE_ID_BROADCAST,
+    SERIAL_POLL_DELAY_MS,
     UART_BAUDRATE,
     UART_BITS,
     UART_PARITY,
     UART_STOP,
-
-    # Protocol framing
-    FRAME_SOF,
-    MAX_PAYLOAD_SIZE,
-
-    # Command IDs
-    CMD_SET_MODE,
-    CMD_HEARTBEAT,
-
-    # Poll loop behavior
-    SERIAL_POLL_DELAY_MS,
 )
+
+__all__ = [
+    "BOOT_HIGH_IS_CENTRAL",
+    "BOOT_SELECT_PIN",
+    "BOOT_SELECT_PULL",
+    "CENTRAL_ENTRY_MODULE",
+    "DIFF_ENTRY_MODULE",
+    "FRAME_SOF",
+    "MAX_PAYLOAD_SIZE",
+    "CMD_HEARTBEAT",
+    "CMD_SET_MODE",
+    "NODE_ID_CENTRAL",
+    "NODE_ID_DIFF_FRONT",
+    "NODE_ID_DIFF_REAR",
+    "NODE_ID_BROADCAST",
+    "SERIAL_POLL_DELAY_MS",
+    "UART_BAUDRATE",
+    "UART_BITS",
+    "UART_PARITY",
+    "UART_STOP",
+]

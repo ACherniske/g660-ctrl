@@ -13,12 +13,13 @@ from common.constants import (
     CMD_HEARTBEAT,
     FRAME_SOF,
     MAX_PAYLOAD_SIZE,
+    NODE_ID_BROADCAST,
 )
 
 _MODE_TO_BYTE = {
-    DifferentialMode.NEUTRAL: b"N", # 0X4E
-    DifferentialMode.LIMITED_SLIP: b"L", # 0x4C
-    DifferentialMode.LOCKED: b"K", # 0x4B
+    DifferentialMode.NEUTRAL: b"N",  # 0x4E
+    DifferentialMode.LIMITED_SLIP: b"L",  # 0x4C
+    DifferentialMode.LOCKED: b"K",  # 0x4B
 }
 
 _BYTE_TO_MODE = {
@@ -85,10 +86,10 @@ def parse_frame(frame: bytes):
 
 class SerialProtocol:
     """UART framing helper for command transport.
-    
-    params:
-    - uart: UART object for transport
-    - node_id: this node's ID for addressing
+
+    Args:
+        uart: UART object for transport.
+        node_id: This node's ID for addressing.
     """
 
     def __init__(self, uart, node_id: int) -> None:
@@ -98,7 +99,13 @@ class SerialProtocol:
 
     def send_frame(self, dst: int, cmd: int, payload: bytes = b"") -> None:
         """Send one generic frame."""
-        self._uart.write(build_frame(dst=dst, src=self._node_id, cmd=cmd, payload=payload))
+        frame = build_frame(
+            dst=dst,
+            src=self._node_id,
+            cmd=cmd,
+            payload=payload,
+        )
+        self._uart.write(frame)
 
     def send_set_mode(self, dst: int, mode: str) -> bool:
         """Send a mode command frame. Returns True if sent."""
@@ -109,7 +116,7 @@ class SerialProtocol:
         self.send_frame(dst=dst, cmd=CMD_SET_MODE, payload=mode_byte)
         return True
 
-    def send_heartbeat(self, dst: int = 0xFF) -> None:
+    def send_heartbeat(self, dst: int = NODE_ID_BROADCAST) -> None:
         """Send a heartbeat frame to the specified destination (default broadcast)."""
         self.send_frame(dst=dst, cmd=CMD_HEARTBEAT)
 
@@ -148,7 +155,7 @@ class SerialProtocol:
             if parsed is None:
                 continue
 
-            if parsed["dst"] not in (self._node_id, 0xFF):
+            if parsed["dst"] not in (self._node_id, NODE_ID_BROADCAST):
                 continue
 
             messages.append(parsed)
