@@ -7,6 +7,11 @@ from common.constants import (
 	UART_BAUDRATE as DEFAULT_UART_BAUDRATE,
 )
 
+# Deployment mode
+# True: central-managed (UART commands + heartbeat behavior enabled)
+# False: standalone (local selector only; UART/heartbeat behavior disabled)
+CENTRAL_CONTROL_ENABLED = True
+
 # Motor outputs
 MOTOR_CW_PIN = 25
 MOTOR_CCW_PIN = 26

@@ -85,13 +85,17 @@ class DiffModuleApp:
             )
             self._local_selector_mode = InputModeResolver(input_bank=self._local_selector)
 
-        self._uart = UART(
-            pins.UART_ID,
-            baudrate=pins.UART_BAUDRATE,
-            tx=pins.UART_TX_PIN,
-            rx=pins.UART_RX_PIN,
-        )
-        self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
+        self._uart = None
+        self._protocol = None
+        if pins.CENTRAL_CONTROL_ENABLED:
+            self._uart = UART(
+                pins.UART_ID,
+                baudrate=pins.UART_BAUDRATE,
+                tx=pins.UART_TX_PIN,
+                rx=pins.UART_RX_PIN,
+            )
+            self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
+
         self._last_reported_sensor_mode = DifferentialMode.UNKNOWN
         self._last_central_heartbeat_ms = 0
         self._heartbeat_watchdog_armed = not pins.HEARTBEAT_WATCHDOG_REQUIRE_FIRST_HEARTBEAT
@@ -101,6 +105,9 @@ class DiffModuleApp:
 
     def _on_mode_applied(self, _mode: str) -> None:
         """Report applied mode to central module."""
+        if self._protocol is None:
+            return
+
         if DifferentialMode.is_drive_mode(_mode):
             self._protocol.send_mode_status(NODE_ID_CENTRAL, _mode)
 
@@ -109,6 +116,9 @@ class DiffModuleApp:
 
     def _handle_remote_commands(self) -> None:
         """Handle UART commands and queue mode requests."""
+        if self._protocol is None:
+            return
+
         now = time.ticks_ms()
 
         for message in self._protocol.poll():
@@ -141,6 +151,9 @@ class DiffModuleApp:
 
     def _check_heartbeat_watchdog(self) -> None:
         """Reset module when central heartbeat is missing for too long."""
+        if not pins.CENTRAL_CONTROL_ENABLED:
+            return
+
         if not pins.HEARTBEAT_WATCHDOG_ENABLED:
             return
 
@@ -182,7 +195,8 @@ class DiffModuleApp:
             and DifferentialMode.is_drive_mode(sensor_mode)
         ):
             self._last_reported_sensor_mode = sensor_mode
-            self._protocol.send_mode_status(NODE_ID_CENTRAL, sensor_mode)
+            if self._protocol is not None:
+                self._protocol.send_mode_status(NODE_ID_CENTRAL, sensor_mode)
 
         active_sensors = self._position_inputs.get_active_switches()
         self._transition.step(sensor_mode, active_sensors=active_sensors)
