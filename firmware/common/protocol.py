@@ -11,6 +11,7 @@ from common.modes import DifferentialMode
 from common.constants import (
     CMD_SET_MODE,
     CMD_HEARTBEAT,
+    CMD_MODE_STATUS,
     FRAME_SOF,
     MAX_PAYLOAD_SIZE,
     NODE_ID_BROADCAST,
@@ -114,6 +115,15 @@ class SerialProtocol:
             return False
 
         self.send_frame(dst=dst, cmd=CMD_SET_MODE, payload=mode_byte)
+        return True
+
+    def send_mode_status(self, dst: int, mode: str) -> bool:
+        """Send current mode status as one-byte ASCII payload."""
+        mode_byte = mode_to_byte(mode)
+        if mode_byte is None:
+            return False
+
+        self.send_frame(dst=dst, cmd=CMD_MODE_STATUS, payload=mode_byte)
         return True
 
     def send_heartbeat(self, dst: int = NODE_ID_BROADCAST) -> None:

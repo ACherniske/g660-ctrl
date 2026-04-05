@@ -7,7 +7,7 @@ transitions, and uses position sensors as the stop/completion authority.
 import time
 from machine import Pin, UART
 
-from common.constants import CMD_SET_MODE
+from common.constants import CMD_HEARTBEAT, CMD_SET_MODE, NODE_ID_CENTRAL
 from common.modes import DifferentialMode
 from common.protocol import SerialProtocol, byte_to_mode
 from common.switch_input import DiffModeButtons, DiffPositionSensors
@@ -91,12 +91,15 @@ class DiffModuleApp:
             rx=pins.UART_RX_PIN,
         )
         self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
+        self._last_reported_sensor_mode = DifferentialMode.UNKNOWN
 
     def _on_mode_request(self, _mode: str) -> None:
         """Optional hook for telemetry or status indicators."""
 
     def _on_mode_applied(self, _mode: str) -> None:
-        """Optional hook for telemetry or status indicators."""
+        """Report applied mode to central module."""
+        if DifferentialMode.is_drive_mode(_mode):
+            self._protocol.send_mode_status(NODE_ID_CENTRAL, _mode)
 
     def _on_fault(self, _fault_code: str) -> None:
         """Optional hook for telemetry or status indicators."""
@@ -104,18 +107,28 @@ class DiffModuleApp:
     def _handle_remote_commands(self) -> None:
         """Handle UART commands and queue mode requests."""
         for message in self._protocol.poll():
-            if message["cmd"] != CMD_SET_MODE:
+            cmd = message["cmd"]
+
+            if cmd == CMD_SET_MODE:
+                payload = message["payload"]
+                if len(payload) != 1:
+                    continue
+
+                requested_mode = byte_to_mode(payload[0])
+                if requested_mode is None:
+                    continue
+
+                self._transition.request_mode(requested_mode)
                 continue
 
-            payload = message["payload"]
-            if len(payload) != 1:
-                continue
-
-            requested_mode = byte_to_mode(payload[0])
-            if requested_mode is None:
-                continue
-
-            self._transition.request_mode(requested_mode)
+            if cmd == CMD_HEARTBEAT:
+                source_id = message["src"]
+                self._protocol.send_heartbeat(dst=source_id)
+                if DifferentialMode.is_drive_mode(self._last_reported_sensor_mode):
+                    self._protocol.send_mode_status(
+                        dst=source_id,
+                        mode=self._last_reported_sensor_mode,
+                    )
 
     def _handle_local_selector(self) -> None:
         """Queue mode requests from local selector buttons."""
@@ -135,6 +148,13 @@ class DiffModuleApp:
         self._handle_local_selector()
 
         sensor_mode = self._position_mode.update()
+        if (
+            sensor_mode != self._last_reported_sensor_mode
+            and DifferentialMode.is_drive_mode(sensor_mode)
+        ):
+            self._last_reported_sensor_mode = sensor_mode
+            self._protocol.send_mode_status(NODE_ID_CENTRAL, sensor_mode)
+
         active_sensors = self._position_inputs.get_active_switches()
         self._transition.step(sensor_mode, active_sensors=active_sensors)
 
