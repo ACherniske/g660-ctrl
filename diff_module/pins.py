@@ -10,7 +10,7 @@ MOTOR_CCW_PIN = 26
 # Position sensors (left to right: neutral, limited slip, locked)
 POSITION_NEUTRAL_PIN = 32
 POSITION_LIMITED_SLIP_PIN = 33
-POSITION_LOCKED_PIN = 34
+POSITION_LOCKED_PIN = 13
 
 # Local mode selector buttons (left to right: neutral, limited slip, locked)
 SELECTOR_NEUTRAL_PIN = 14
