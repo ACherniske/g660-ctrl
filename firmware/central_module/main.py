@@ -5,9 +5,10 @@ modules, monitors module heartbeat, and tracks each diff's current mode.
 """
 
 import time
-from machine import Pin, UART
+from machine import I2C, Pin, UART
 
 from central_module import config, pins
+from central_module.display import CentralStatusDisplay, I2cBackpackLcd1602
 from common.constants import (
     CMD_HEARTBEAT,
     CMD_MODE_STATUS,
@@ -53,6 +54,32 @@ class CentralModuleApp:
         }
 
         self._last_heartbeat_ms = 0
+        self._last_display_refresh_ms = 0
+        self._display = self._build_display()
+
+    def _build_display(self):
+        """Create optional LCD display wrapper if enabled in config."""
+        if not config.DISPLAY_ENABLED:
+            return None
+
+        try:
+            i2c = I2C(
+                pins.DISPLAY_I2C_ID,
+                scl=Pin(pins.DISPLAY_I2C_SCL_PIN),
+                sda=Pin(pins.DISPLAY_I2C_SDA_PIN),
+                freq=pins.DISPLAY_I2C_FREQ,
+            )
+            lcd = I2cBackpackLcd1602(
+                i2c=i2c,
+                address=pins.DISPLAY_I2C_ADDRESS,
+                cols=pins.DISPLAY_COLS,
+                rows=pins.DISPLAY_ROWS,
+            )
+            lcd.write_lines("g660 central", "starting...")
+            return CentralStatusDisplay(lcd)
+        except Exception:
+            # Keep runtime alive even if display wiring/driver is unavailable.
+            return None
 
     def _register_buttons(self, pull_mode: int) -> None:
         """Register configured button pins (1..6)."""
@@ -146,12 +173,31 @@ class CentralModuleApp:
             elapsed = time.ticks_diff(now, last_seen)
             self._diff_online[node_id] = elapsed <= HEARTBEAT_TIMEOUT_MS
 
+    def _update_display(self) -> None:
+        """Refresh optional LCD status display at configured interval."""
+        if self._display is None:
+            return
+
+        now = time.ticks_ms()
+        elapsed = time.ticks_diff(now, self._last_display_refresh_ms)
+        if elapsed < config.DISPLAY_REFRESH_MS:
+            return
+
+        self._last_display_refresh_ms = now
+        self._display.update(
+            front_mode=self._diff_modes[NODE_ID_DIFF_FRONT],
+            rear_mode=self._diff_modes[NODE_ID_DIFF_REAR],
+            front_online=self._diff_online[NODE_ID_DIFF_FRONT],
+            rear_online=self._diff_online[NODE_ID_DIFF_REAR],
+        )
+
     def step(self) -> None:
         """Run one control-loop cycle."""
         self._poll_buttons()
         self._send_heartbeats()
         self._process_incoming()
         self._update_online_flags()
+        self._update_display()
 
     def run(self) -> None:
         """Run forever."""
