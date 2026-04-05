@@ -20,6 +20,15 @@ from common.constants import (
     UART_PARITY,
     UART_STOP,
 )
+from common.modes import DifferentialMode
+from common.switch_input import (
+    DiffModeButtons,
+    DiffPositionSensors,
+    SwitchCollection,
+    SwitchInput,
+    ThreeInputBank,
+    WheelModeButtons,
+)
 
 __all__ = [
     "BOOT_HIGH_IS_CENTRAL",
@@ -40,4 +49,11 @@ __all__ = [
     "UART_BITS",
     "UART_PARITY",
     "UART_STOP",
+    "DifferentialMode",
+    "SwitchInput",
+    "SwitchCollection",
+    "ThreeInputBank",
+    "DiffModeButtons",
+    "WheelModeButtons",
+    "DiffPositionSensors",
 ]

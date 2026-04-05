@@ -1,4 +1,4 @@
-"""Differential mode definitions used across hardware modules."""
+"""Differential mode definitions shared across firmware modules."""
 
 
 class DifferentialMode:

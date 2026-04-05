@@ -6,7 +6,7 @@ Protocol frame format:
 CRC is XOR of all bytes from DST through payload.
 """
 
-from hardware.modes import DifferentialMode
+from common.modes import DifferentialMode
 
 from common.constants import (
     CMD_SET_MODE,
