@@ -10,9 +10,12 @@ from common.modes import DifferentialMode
 
 from common.constants import (
     CMD_ACK,
+    CMD_FAULT_STATUS,
     CMD_SET_MODE,
     CMD_HEARTBEAT,
     CMD_MODE_STATUS,
+    CMD_NODE_STATE,
+    CMD_STATUS_REQUEST,
     FRAME_SOF,
     MAX_PAYLOAD_SIZE,
     NODE_ID_BROADCAST,
@@ -22,13 +25,35 @@ _MODE_TO_BYTE = {
     DifferentialMode.NEUTRAL: b"N",  # 0x4E
     DifferentialMode.LIMITED_SLIP: b"L",  # 0x4C
     DifferentialMode.LOCKED: b"K",  # 0x4B
+    DifferentialMode.UNKNOWN: b"U",  # 0x55
+    DifferentialMode.INVALID: b"I",  # 0x49
 }
 
 _BYTE_TO_MODE = {
     b"N": DifferentialMode.NEUTRAL,
     b"L": DifferentialMode.LIMITED_SLIP,
     b"K": DifferentialMode.LOCKED,
+    b"U": DifferentialMode.UNKNOWN,
+    b"I": DifferentialMode.INVALID,
 }
+
+FAULT_NONE = "fault_cleared"
+FAULT_TRAVEL_TIMEOUT = "travel_timeout"
+FAULT_SENSOR_INVALID_COMBO = "sensor_invalid_combo"
+FAULT_HEARTBEAT_TIMEOUT = "heartbeat_timeout"
+FAULT_DEGRADED_MODE = "degraded_mode"
+
+_FAULT_TO_BYTE = {
+    FAULT_NONE: 0x00,
+    FAULT_TRAVEL_TIMEOUT: 0x01,
+    FAULT_SENSOR_INVALID_COMBO: 0x02,
+    FAULT_HEARTBEAT_TIMEOUT: 0x03,
+    FAULT_DEGRADED_MODE: 0x04,
+}
+
+_BYTE_TO_FAULT = {value: key for key, value in _FAULT_TO_BYTE.items()}
+
+NODE_STATE_FLAG_DEGRADED = 0x01
 
 
 def mode_to_byte(mode: str):
@@ -41,6 +66,23 @@ def byte_to_mode(value):
     if isinstance(value, int):
         value = bytes((value,))
     return _BYTE_TO_MODE.get(value)
+
+
+def fault_to_byte(fault_code: str):
+    """Return one-byte fault code payload."""
+    code = _FAULT_TO_BYTE.get(fault_code)
+    if code is None:
+        return None
+    return bytes((code,))
+
+
+def byte_to_fault(value):
+    """Return fault-code string from one-byte fault payload."""
+    if isinstance(value, bytes):
+        if len(value) != 1:
+            return None
+        value = value[0]
+    return _BYTE_TO_FAULT.get(value)
 
 
 def _crc_xor(data: bytes) -> int:
@@ -109,13 +151,23 @@ class SerialProtocol:
         )
         self._uart.write(frame)
 
-    def send_set_mode(self, dst: int, mode: str) -> bool:
-        """Send a mode command frame. Returns True if sent."""
+    def send_set_mode(self, dst: int, mode: str, seq: int = None) -> bool:
+        """Send a mode command frame. Returns True if sent.
+
+        Payload is:
+        - ``[mode]`` when ``seq`` is None
+        - ``[mode, seq]`` when ``seq`` is provided
+        """
         mode_byte = mode_to_byte(mode)
         if mode_byte is None:
             return False
 
-        self.send_frame(dst=dst, cmd=CMD_SET_MODE, payload=mode_byte)
+        if seq is None:
+            payload = mode_byte
+        else:
+            payload = mode_byte + bytes((seq & 0xFF,))
+
+        self.send_frame(dst=dst, cmd=CMD_SET_MODE, payload=payload)
         return True
 
     def send_mode_status(self, dst: int, mode: str) -> bool:
@@ -131,9 +183,42 @@ class SerialProtocol:
         """Send a heartbeat frame to the specified destination (default broadcast)."""
         self.send_frame(dst=dst, cmd=CMD_HEARTBEAT)
 
-    def send_ack(self, dst: int, acked_cmd: int) -> None:
-        """Send one-byte command acknowledgment payload."""
-        self.send_frame(dst=dst, cmd=CMD_ACK, payload=bytes((acked_cmd & 0xFF,)))
+    def send_ack(self, dst: int, acked_cmd: int, seq: int = None) -> None:
+        """Send command acknowledgment payload.
+
+        Payload is:
+        - ``[acked_cmd]`` when ``seq`` is None
+        - ``[acked_cmd, seq]`` when ``seq`` is provided
+        """
+        payload = bytes((acked_cmd & 0xFF,))
+        if seq is not None:
+            payload += bytes((seq & 0xFF,))
+
+        self.send_frame(dst=dst, cmd=CMD_ACK, payload=payload)
+
+    def send_status_request(self, dst: int) -> None:
+        """Request one node-state report from destination node."""
+        self.send_frame(dst=dst, cmd=CMD_STATUS_REQUEST)
+
+    def send_node_state(self, dst: int, mode: str, degraded: bool) -> bool:
+        """Send node-state payload ``[mode_byte, flags]``."""
+        mode_byte = mode_to_byte(mode)
+        if mode_byte is None:
+            return False
+
+        flags = NODE_STATE_FLAG_DEGRADED if degraded else 0
+        payload = mode_byte + bytes((flags & 0xFF,))
+        self.send_frame(dst=dst, cmd=CMD_NODE_STATE, payload=payload)
+        return True
+
+    def send_fault_status(self, dst: int, fault_code: str) -> bool:
+        """Send one-byte fault status payload."""
+        code_byte = fault_to_byte(fault_code)
+        if code_byte is None:
+            return False
+
+        self.send_frame(dst=dst, cmd=CMD_FAULT_STATUS, payload=code_byte)
+        return True
 
     def poll(self):
         """Read UART and return list of parsed messages for this node."""

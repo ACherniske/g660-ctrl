@@ -57,6 +57,9 @@ BUS_CONTENTION_MITIGATION_ENABLED = True
 CENTRAL_REPLY_BASE_DELAY_MS = 2
 CENTRAL_REPLY_NODE_STEP_MS = 3
 
+# Duplicate command protection (for retry/ACK ambiguity on shared bus).
+SET_MODE_DEDUPE_WINDOW_MS = 1500
+
 # Optional comms-loss reset watchdog.
 # When enabled, this module will reset if central heartbeat is not seen
 # for longer than HEARTBEAT_WATCHDOG_TIMEOUT_MS.
@@ -67,6 +70,9 @@ HEARTBEAT_WATCHDOG_REQUIRE_FIRST_HEARTBEAT = True
 
 # Watchdog reboot-loop protection.
 BOOT_STATE_FILE = "diff_boot_state.json"
+BOOT_STATE_USE_NVS = True
+BOOT_STATE_NVS_NAMESPACE = "g660diff"
+BOOT_STATE_WRITE_MIN_INTERVAL_MS = 1000
 MAX_WATCHDOG_REBOOTS = 3
 WATCHDOG_RECOVERY_HEARTBEAT_COUNT = 20
 

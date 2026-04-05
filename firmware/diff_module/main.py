@@ -8,7 +8,7 @@ import time
 import machine
 from machine import Pin, UART
 
-from common.constants import CMD_HEARTBEAT, CMD_SET_MODE, NODE_ID_CENTRAL
+from common.constants import CMD_HEARTBEAT, CMD_SET_MODE, CMD_STATUS_REQUEST, NODE_ID_CENTRAL
 from common.modes import DifferentialMode
 from common.protocol import SerialProtocol, byte_to_mode
 from common.switch_input import DiffModeButtons, DiffPositionSensors
@@ -18,6 +18,9 @@ from diff_module.mode_selector import ModeSelector as RequestModeSelector
 from diff_module.motor_controller import MotorController
 from diff_module.transition_controller import TransitionController
 from hardware.mode_selector import ModeSelector as InputModeResolver
+
+
+_FAULT_NONE = "fault_cleared"
 
 
 class DiffModuleApp:
@@ -42,6 +45,9 @@ class DiffModuleApp:
 
         if pins.CENTRAL_REPLY_NODE_STEP_MS < 0:
             raise ValueError("CENTRAL_REPLY_NODE_STEP_MS must be >= 0")
+
+        if pins.SET_MODE_DEDUPE_WINDOW_MS < 0:
+            raise ValueError("SET_MODE_DEDUPE_WINDOW_MS must be >= 0")
 
         if pins.MAX_WATCHDOG_REBOOTS < 1:
             raise ValueError("MAX_WATCHDOG_REBOOTS must be >= 1")
@@ -149,7 +155,12 @@ class DiffModuleApp:
             )
             self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
 
-        self._boot_state = BootStateStore(path=pins.BOOT_STATE_FILE)
+        self._boot_state = BootStateStore(
+            path=pins.BOOT_STATE_FILE,
+            use_nvs=pins.BOOT_STATE_USE_NVS,
+            nvs_namespace=pins.BOOT_STATE_NVS_NAMESPACE,
+            write_min_interval_ms=pins.BOOT_STATE_WRITE_MIN_INTERVAL_MS,
+        )
         self._boot_info = self._boot_state.load()
         self._watchdog_reset_count = self._boot_info["watchdog_reset_count"]
         self._degraded_mode = (
@@ -158,6 +169,8 @@ class DiffModuleApp:
             and self._watchdog_reset_count >= pins.MAX_WATCHDOG_REBOOTS
         )
         self._recovery_heartbeat_count = 0
+        self._recent_set_mode_by_source = {}
+        self._active_fault = None
 
         self._last_reported_sensor_mode = DifferentialMode.UNKNOWN
         self._last_central_heartbeat_ms = 0
@@ -180,6 +193,11 @@ class DiffModuleApp:
 
     def _on_fault(self, _fault_code: str) -> None:
         """Optional hook for telemetry or status indicators."""
+        if _fault_code == self._active_fault:
+            return
+
+        self._active_fault = _fault_code
+        self._send_fault_to_central(_fault_code)
 
     def _central_reply_delay_ms(self) -> int:
         """Return deterministic per-node delay for central-bound replies."""
@@ -205,6 +223,47 @@ class DiffModuleApp:
 
         self._delay_before_reply_to_central(NODE_ID_CENTRAL)
         self._protocol.send_mode_status(NODE_ID_CENTRAL, mode)
+
+    def _send_fault_to_central(self, fault_code: str) -> None:
+        """Send one-byte fault telemetry event to central."""
+        if self._protocol is None:
+            return
+
+        self._delay_before_reply_to_central(NODE_ID_CENTRAL)
+        self._protocol.send_fault_status(NODE_ID_CENTRAL, fault_code)
+
+    def _send_node_state_to(self, dst: int) -> None:
+        """Send explicit node-state snapshot to destination."""
+        if self._protocol is None:
+            return
+
+        self._delay_before_reply_to_central(dst)
+        self._protocol.send_node_state(
+            dst=dst,
+            mode=self._last_reported_sensor_mode,
+            degraded=self._degraded_mode,
+        )
+
+    def _is_duplicate_set_mode(self, source_id: int, seq: int) -> bool:
+        """Return True when set-mode sequence is duplicate in dedupe window."""
+        if seq is None:
+            return False
+
+        record = self._recent_set_mode_by_source.get(source_id)
+        if record is None:
+            self._recent_set_mode_by_source[source_id] = {
+                "seq": seq,
+                "ms": time.ticks_ms(),
+            }
+            return False
+
+        elapsed = time.ticks_diff(time.ticks_ms(), record["ms"])
+        is_duplicate = record["seq"] == seq and elapsed <= pins.SET_MODE_DEDUPE_WINDOW_MS
+        if not is_duplicate:
+            record["seq"] = seq
+            record["ms"] = time.ticks_ms()
+
+        return is_duplicate
 
     @staticmethod
     def _is_sensor_combo_valid(active_sensors: frozenset) -> bool:
@@ -249,16 +308,37 @@ class DiffModuleApp:
                     continue
 
                 payload = message["payload"]
-                if len(payload) != 1:
+                if len(payload) not in (1, 2):
                     continue
 
                 requested_mode = byte_to_mode(payload[0])
                 if requested_mode is None:
                     continue
 
+                set_mode_seq = payload[1] if len(payload) == 2 else None
+
+                if self._is_duplicate_set_mode(source_id, set_mode_seq):
+                    self._delay_before_reply_to_central(source_id)
+                    self._protocol.send_ack(
+                        dst=source_id,
+                        acked_cmd=CMD_SET_MODE,
+                        seq=set_mode_seq,
+                    )
+                    continue
+
                 self._transition.request_mode(requested_mode)
                 self._delay_before_reply_to_central(source_id)
-                self._protocol.send_ack(dst=source_id, acked_cmd=CMD_SET_MODE)
+                self._protocol.send_ack(
+                    dst=source_id,
+                    acked_cmd=CMD_SET_MODE,
+                    seq=set_mode_seq,
+                )
+                continue
+
+            if cmd == CMD_STATUS_REQUEST:
+                self._send_node_state_to(source_id)
+                if self._active_fault is not None:
+                    self._send_fault_to_central(self._active_fault)
                 continue
 
             if cmd == CMD_HEARTBEAT:
@@ -274,6 +354,7 @@ class DiffModuleApp:
                         dst=source_id,
                         mode=self._last_reported_sensor_mode,
                     )
+                self._send_node_state_to(source_id)
 
     def _handle_recovery_heartbeat(self) -> None:
         """Count stable heartbeats to exit degraded mode safely."""
@@ -288,6 +369,9 @@ class DiffModuleApp:
         self._recovery_heartbeat_count = 0
         self._watchdog_reset_count = 0
         self._boot_state.clear_watchdog_reset_state()
+        self._send_fault_to_central(_FAULT_NONE)
+        self._active_fault = None
+        self._send_node_state_to(NODE_ID_CENTRAL)
 
     def _check_heartbeat_watchdog(self) -> None:
         """Reset module when central heartbeat is missing for too long."""
@@ -313,6 +397,7 @@ class DiffModuleApp:
 
         # Fail safe: stop outputs before reset.
         self._motor.stop()
+        self._send_fault_to_central("heartbeat_timeout")
         self._boot_state.mark_watchdog_timeout_reset()
         machine.reset()
 
@@ -343,8 +428,13 @@ class DiffModuleApp:
             self._on_fault("sensor_invalid_combo")
             self._transition.clear()
             return
+        if self._active_fault == "sensor_invalid_combo":
+            self._send_fault_to_central(_FAULT_NONE)
+            self._active_fault = None
 
         if self._degraded_mode:
+            if self._active_fault != "degraded_mode":
+                self._on_fault("degraded_mode")
             self._transition.clear()
             self._motor.stop()
             self._check_heartbeat_watchdog()

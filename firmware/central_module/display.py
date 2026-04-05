@@ -173,6 +173,41 @@ class CentralStatusDisplay:
         return "ON" if online else "OF"
 
     @staticmethod
+    def _fault_token(fault_code: str) -> str:
+        if fault_code == "travel_timeout":
+            return "TRV"
+        if fault_code == "sensor_invalid_combo":
+            return "SNS"
+        if fault_code == "heartbeat_timeout":
+            return "HBT"
+        if fault_code == "degraded_mode":
+            return "DGD"
+        return "---"
+
+    @staticmethod
+    def _degraded_lines(front_degraded: bool, rear_degraded: bool):
+        """Return full-screen degraded warning text when needed."""
+        if not front_degraded and not rear_degraded:
+            return None
+
+        if front_degraded and rear_degraded:
+            return ("!!! DEGRADED !!!", "F+R LOCKOUT   ")
+
+        if front_degraded:
+            return ("!!! DEGRADED !!!", "FRONT LOCKOUT ")
+
+        return ("!!! DEGRADED !!!", "REAR LOCKOUT  ")
+
+    def _fault_lines(self, front_fault: str, rear_fault: str):
+        """Return compact fault lines when either diff reports a fault."""
+        if not front_fault and not rear_fault:
+            return None
+
+        line1 = "F FLT:{}".format(self._fault_token(front_fault) if front_fault else "---")
+        line2 = "R FLT:{}".format(self._fault_token(rear_fault) if rear_fault else "---")
+        return (line1, line2)
+
+    @staticmethod
     def _offline_lines(front_online: bool, rear_online: bool, blocked_nodes: str = None):
         """Return full-screen offline warning text when needed."""
         if front_online and rear_online:
@@ -201,6 +236,10 @@ class CentralStatusDisplay:
         front_online: bool,
         rear_online: bool,
         blocked_nodes: str = None,
+        front_degraded: bool = False,
+        rear_degraded: bool = False,
+        front_fault: str = None,
+        rear_fault: str = None,
     ) -> None:
         """Render front/rear mode + online flags to the LCD."""
         offline_lines = self._offline_lines(
@@ -210,6 +249,26 @@ class CentralStatusDisplay:
         )
         if offline_lines is not None:
             lines = offline_lines
+            if lines == self._last_lines:
+                return
+
+            self._lcd.write_lines(lines[0], lines[1])
+            self._last_lines = lines
+            return
+
+        degraded_lines = self._degraded_lines(front_degraded, rear_degraded)
+        if degraded_lines is not None:
+            lines = degraded_lines
+            if lines == self._last_lines:
+                return
+
+            self._lcd.write_lines(lines[0], lines[1])
+            self._last_lines = lines
+            return
+
+        fault_lines = self._fault_lines(front_fault, rear_fault)
+        if fault_lines is not None:
+            lines = fault_lines
             if lines == self._last_lines:
                 return
 

@@ -11,16 +11,18 @@ from central_module import config, pins
 from central_module.display import CentralStatusDisplay, I2cBackpackLcd1602
 from common.constants import (
     CMD_ACK,
+    CMD_FAULT_STATUS,
     CMD_HEARTBEAT,
     CMD_SET_MODE,
     CMD_MODE_STATUS,
+    CMD_NODE_STATE,
     HEARTBEAT_INTERVAL_MS,
     HEARTBEAT_TIMEOUT_MS,
     NODE_ID_DIFF_FRONT,
     NODE_ID_DIFF_REAR,
 )
 from common.modes import DifferentialMode
-from common.protocol import SerialProtocol, byte_to_mode
+from common.protocol import NODE_STATE_FLAG_DEGRADED, SerialProtocol, byte_to_fault, byte_to_mode
 from common.switch_input import SwitchCollection
 
 
@@ -47,6 +49,9 @@ class CentralModuleApp:
 
         if config.SET_MODE_INTERFRAME_GAP_MS < 0:
             raise ValueError("SET_MODE_INTERFRAME_GAP_MS must be >= 0")
+
+        if config.RECONCILE_REQUEST_MIN_INTERVAL_MS <= 0:
+            raise ValueError("RECONCILE_REQUEST_MIN_INTERVAL_MS must be > 0")
 
         if config.DISPLAY_REFRESH_MS <= 0:
             raise ValueError("DISPLAY_REFRESH_MS must be > 0")
@@ -90,6 +95,18 @@ class CentralModuleApp:
             NODE_ID_DIFF_FRONT: False,
             NODE_ID_DIFF_REAR: False,
         }
+        self._diff_degraded = {
+            NODE_ID_DIFF_FRONT: False,
+            NODE_ID_DIFF_REAR: False,
+        }
+        self._diff_fault = {
+            NODE_ID_DIFF_FRONT: None,
+            NODE_ID_DIFF_REAR: None,
+        }
+        self._last_status_request_ms = {
+            NODE_ID_DIFF_FRONT: 0,
+            NODE_ID_DIFF_REAR: 0,
+        }
 
         now = time.ticks_ms()
         self._last_heartbeat_ms = {
@@ -107,6 +124,10 @@ class CentralModuleApp:
             NODE_ID_DIFF_FRONT: None,
             NODE_ID_DIFF_REAR: None,
         }
+        self._next_set_mode_seq = {
+            NODE_ID_DIFF_FRONT: 1,
+            NODE_ID_DIFF_REAR: 1,
+        }
         self._display = self._build_display()
 
     def _in_startup_grace(self) -> bool:
@@ -116,14 +137,28 @@ class CentralModuleApp:
 
     def _send_set_mode_with_tracking(self, node_id: int, mode: str) -> None:
         """Send set-mode and start ACK wait/retry tracking."""
-        if not self._protocol.send_set_mode(node_id, mode):
+        seq = self._next_set_mode_seq[node_id] & 0xFF
+        self._next_set_mode_seq[node_id] = (seq + 1) & 0xFF
+
+        if not self._protocol.send_set_mode(node_id, mode, seq=seq):
             return
 
         self._pending_set_mode[node_id] = {
             "mode": mode,
+            "seq": seq,
             "attempts": 1,
             "last_sent_ms": time.ticks_ms(),
         }
+
+    def _send_status_request(self, node_id: int) -> None:
+        """Request explicit node-state snapshot from one diff."""
+        now = time.ticks_ms()
+        elapsed = time.ticks_diff(now, self._last_status_request_ms[node_id])
+        if elapsed < config.RECONCILE_REQUEST_MIN_INTERVAL_MS:
+            return
+
+        self._last_status_request_ms[node_id] = now
+        self._protocol.send_status_request(dst=node_id)
 
     def _build_display(self):
         """Create optional LCD display wrapper if enabled in config."""
@@ -238,17 +273,64 @@ class CentralModuleApp:
             if src not in self._diff_last_seen_ms:
                 continue
 
+            was_online = self._diff_online[src]
             self._diff_last_seen_ms[src] = now
             self._diff_online[src] = True
+            if not was_online:
+                self._send_status_request(src)
 
             cmd = message["cmd"]
             if cmd == CMD_ACK:
                 payload = message["payload"]
+                if len(payload) not in (1, 2):
+                    continue
+
+                if payload[0] != CMD_SET_MODE:
+                    continue
+
+                pending = self._pending_set_mode[src]
+                if pending is None:
+                    continue
+
+                if len(payload) == 2 and payload[1] != pending["seq"]:
+                    continue
+
+                if len(payload) == 1:
+                    # Legacy ACK without sequence; accept only when one pending exists.
+                    pass
+
+                if pending is not None:
+                    self._pending_set_mode[src] = None
+                continue
+
+            if cmd == CMD_NODE_STATE:
+                payload = message["payload"]
+                if len(payload) != 2:
+                    continue
+
+                mode = byte_to_mode(payload[0])
+                if mode is not None:
+                    self._diff_modes[src] = mode
+
+                self._diff_degraded[src] = bool(payload[1] & NODE_STATE_FLAG_DEGRADED)
+                continue
+
+            if cmd == CMD_FAULT_STATUS:
+                payload = message["payload"]
                 if len(payload) != 1:
                     continue
 
-                if payload[0] == CMD_SET_MODE:
-                    self._pending_set_mode[src] = None
+                fault_code = byte_to_fault(payload[0])
+                if fault_code is None:
+                    continue
+
+                if fault_code == "fault_cleared":
+                    self._diff_fault[src] = None
+                    continue
+
+                self._diff_fault[src] = fault_code
+                if fault_code == "degraded_mode":
+                    self._diff_degraded[src] = True
                 continue
 
             if cmd == CMD_MODE_STATUS:
@@ -289,7 +371,11 @@ class CentralModuleApp:
                 self._mark_command_blocked("F" if node_id == NODE_ID_DIFF_FRONT else "R")
                 continue
 
-            if not self._protocol.send_set_mode(node_id, pending["mode"]):
+            if not self._protocol.send_set_mode(
+                node_id,
+                pending["mode"],
+                seq=pending["seq"],
+            ):
                 self._pending_set_mode[node_id] = None
                 continue
 
@@ -317,6 +403,8 @@ class CentralModuleApp:
 
             elapsed = time.ticks_diff(now, last_seen)
             self._diff_online[node_id] = elapsed <= HEARTBEAT_TIMEOUT_MS
+            if not self._diff_online[node_id]:
+                self._diff_degraded[node_id] = False
 
     def _update_display(self) -> None:
         """Refresh optional LCD status display at configured interval."""
@@ -335,6 +423,10 @@ class CentralModuleApp:
             front_online=self._diff_online[NODE_ID_DIFF_FRONT],
             rear_online=self._diff_online[NODE_ID_DIFF_REAR],
             blocked_nodes=self._active_blocked_nodes(),
+            front_degraded=self._diff_degraded[NODE_ID_DIFF_FRONT],
+            rear_degraded=self._diff_degraded[NODE_ID_DIFF_REAR],
+            front_fault=self._diff_fault[NODE_ID_DIFF_FRONT],
+            rear_fault=self._diff_fault[NODE_ID_DIFF_REAR],
         )
 
     def step(self) -> None:
