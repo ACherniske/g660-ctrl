@@ -1,1 +1,0 @@
-"""Differential module application package."""
