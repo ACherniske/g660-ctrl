@@ -119,10 +119,35 @@ class DiffModuleApp:
             return
 
         if DifferentialMode.is_drive_mode(_mode):
-            self._protocol.send_mode_status(NODE_ID_CENTRAL, _mode)
+            self._send_mode_status_to_central(_mode)
 
     def _on_fault(self, _fault_code: str) -> None:
         """Optional hook for telemetry or status indicators."""
+
+    def _central_reply_delay_ms(self) -> int:
+        """Return deterministic per-node delay for central-bound replies."""
+        if not pins.BUS_CONTENTION_MITIGATION_ENABLED:
+            return 0
+
+        node_offset = self._node_id & 0x0F
+        return pins.CENTRAL_REPLY_BASE_DELAY_MS + (node_offset * pins.CENTRAL_REPLY_NODE_STEP_MS)
+
+    def _delay_before_reply_to_central(self, source_id: int) -> None:
+        """Delay short deterministic amount before replying to central."""
+        if source_id != NODE_ID_CENTRAL:
+            return
+
+        delay_ms = self._central_reply_delay_ms()
+        if delay_ms > 0:
+            time.sleep_ms(delay_ms)
+
+    def _send_mode_status_to_central(self, mode: str) -> None:
+        """Send mode status to central with contention mitigation delay."""
+        if self._protocol is None:
+            return
+
+        self._delay_before_reply_to_central(NODE_ID_CENTRAL)
+        self._protocol.send_mode_status(NODE_ID_CENTRAL, mode)
 
     def _handle_remote_commands(self) -> None:
         """Handle UART commands and queue mode requests."""
@@ -143,6 +168,7 @@ class DiffModuleApp:
                     continue
 
                 self._transition.request_mode(requested_mode)
+                self._delay_before_reply_to_central(source_id)
                 self._protocol.send_ack(dst=source_id, acked_cmd=CMD_SET_MODE)
                 continue
 
@@ -151,6 +177,7 @@ class DiffModuleApp:
                     self._last_central_heartbeat_ms = time.ticks_ms()
                     self._heartbeat_watchdog_armed = True
 
+                self._delay_before_reply_to_central(source_id)
                 self._protocol.send_heartbeat(dst=source_id)
                 if DifferentialMode.is_drive_mode(self._last_reported_sensor_mode):
                     self._protocol.send_mode_status(
@@ -205,7 +232,7 @@ class DiffModuleApp:
         ):
             self._last_reported_sensor_mode = sensor_mode
             if self._protocol is not None:
-                self._protocol.send_mode_status(NODE_ID_CENTRAL, sensor_mode)
+                self._send_mode_status_to_central(sensor_mode)
 
         active_sensors = self._position_inputs.get_active_switches()
         self._transition.step(sensor_mode, active_sensors=active_sensors)

@@ -51,6 +51,12 @@ UART_BAUDRATE = DEFAULT_UART_BAUDRATE
 UART_TX_PIN = 17
 UART_RX_PIN = 16
 
+# Shared-bus contention mitigation for diff-to-central replies.
+BUS_CONTENTION_MITIGATION_ENABLED = True
+# Delay = base + (node_low_nibble * step). For 0x11/0x12 this spaces replies.
+CENTRAL_REPLY_BASE_DELAY_MS = 2
+CENTRAL_REPLY_NODE_STEP_MS = 3
+
 # Optional comms-loss reset watchdog.
 # When enabled, this module will reset if central heartbeat is not seen
 # for longer than HEARTBEAT_WATCHDOG_TIMEOUT_MS.

@@ -16,6 +16,10 @@ STARTUP_GRACE_MS = 3000
 SET_MODE_ACK_TIMEOUT_MS = 300
 SET_MODE_MAX_RETRIES = 3
 
+# Shared-bus contention mitigation
+HEARTBEAT_STAGGER_MS = 250
+SET_MODE_INTERFRAME_GAP_MS = 8
+
 BUTTON_PRESETS = {
     1: (DifferentialMode.NEUTRAL, DifferentialMode.NEUTRAL),
     2: (DifferentialMode.LIMITED_SLIP, DifferentialMode.LIMITED_SLIP),

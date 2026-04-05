@@ -55,7 +55,14 @@ class CentralModuleApp:
             NODE_ID_DIFF_REAR: False,
         }
 
-        self._last_heartbeat_ms = 0
+        now = time.ticks_ms()
+        self._last_heartbeat_ms = {
+            NODE_ID_DIFF_FRONT: time.ticks_add(now, -HEARTBEAT_INTERVAL_MS),
+            NODE_ID_DIFF_REAR: time.ticks_add(
+                now,
+                -(HEARTBEAT_INTERVAL_MS - config.HEARTBEAT_STAGGER_MS),
+            ),
+        }
         self._last_display_refresh_ms = 0
         self._command_blocked_until_ms = 0
         self._command_blocked_nodes = ""
@@ -133,15 +140,19 @@ class CentralModuleApp:
         front_mode, rear_mode = preset
         blocked_nodes = []
         startup_grace = self._in_startup_grace()
+        front_sent = False
 
         if DifferentialMode.is_drive_mode(front_mode):
             if self._diff_online[NODE_ID_DIFF_FRONT] or startup_grace:
                 self._send_set_mode_with_tracking(NODE_ID_DIFF_FRONT, front_mode)
+                front_sent = True
             else:
                 blocked_nodes.append("F")
 
         if DifferentialMode.is_drive_mode(rear_mode):
             if self._diff_online[NODE_ID_DIFF_REAR] or startup_grace:
+                if front_sent:
+                    time.sleep_ms(config.SET_MODE_INTERFRAME_GAP_MS)
                 self._send_set_mode_with_tracking(NODE_ID_DIFF_REAR, rear_mode)
             else:
                 blocked_nodes.append("R")
@@ -252,13 +263,13 @@ class CentralModuleApp:
     def _send_heartbeats(self) -> None:
         """Send periodic heartbeat to front and rear diff nodes."""
         now = time.ticks_ms()
-        elapsed = time.ticks_diff(now, self._last_heartbeat_ms)
-        if elapsed < HEARTBEAT_INTERVAL_MS:
-            return
+        for node_id in (NODE_ID_DIFF_FRONT, NODE_ID_DIFF_REAR):
+            elapsed = time.ticks_diff(now, self._last_heartbeat_ms[node_id])
+            if elapsed < HEARTBEAT_INTERVAL_MS:
+                continue
 
-        self._last_heartbeat_ms = now
-        self._protocol.send_heartbeat(dst=NODE_ID_DIFF_FRONT)
-        self._protocol.send_heartbeat(dst=NODE_ID_DIFF_REAR)
+            self._last_heartbeat_ms[node_id] = now
+            self._protocol.send_heartbeat(dst=node_id)
 
     def _update_online_flags(self) -> None:
         """Mark diff online/offline based on heartbeat timeout."""
