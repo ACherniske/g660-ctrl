@@ -23,6 +23,14 @@ class DiffModuleApp:
     """Runtime application for a single differential controller module."""
 
     @staticmethod
+    def _validate_configuration() -> None:
+        """Fail fast on invalid deployment/config combinations."""
+        if not pins.CENTRAL_CONTROL_ENABLED and not pins.LOCAL_SELECTOR_ENABLED:
+            raise ValueError(
+                "Invalid diff config: enable CENTRAL_CONTROL_ENABLED or LOCAL_SELECTOR_ENABLED."
+            )
+
+    @staticmethod
     def _resolve_pull_mode(pull_setting: str) -> int:
         """Map pull setting string to machine Pin pull mode."""
         if pull_setting == "down":
@@ -41,6 +49,8 @@ class DiffModuleApp:
         return pins.NODE_ID_FRONT if is_front else pins.NODE_ID_REAR
 
     def __init__(self) -> None:
+        self._validate_configuration()
+
         pull_mode = Pin.PULL_UP if pins.INPUT_PULL_UP else Pin.PULL_DOWN
         self._node_id = self._resolve_node_id()
 
@@ -119,14 +129,8 @@ class DiffModuleApp:
         if self._protocol is None:
             return
 
-        now = time.ticks_ms()
-
         for message in self._protocol.poll():
             source_id = message["src"]
-            if source_id == NODE_ID_CENTRAL:
-                self._last_central_heartbeat_ms = now
-                self._heartbeat_watchdog_armed = True
-
             cmd = message["cmd"]
 
             if cmd == CMD_SET_MODE:
@@ -142,6 +146,10 @@ class DiffModuleApp:
                 continue
 
             if cmd == CMD_HEARTBEAT:
+                if source_id == NODE_ID_CENTRAL:
+                    self._last_central_heartbeat_ms = time.ticks_ms()
+                    self._heartbeat_watchdog_armed = True
+
                 self._protocol.send_heartbeat(dst=source_id)
                 if DifferentialMode.is_drive_mode(self._last_reported_sensor_mode):
                     self._protocol.send_mode_status(
