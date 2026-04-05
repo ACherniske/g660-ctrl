@@ -173,10 +173,18 @@ class CentralStatusDisplay:
         return "ON" if online else "OF"
 
     @staticmethod
-    def _offline_lines(front_online: bool, rear_online: bool):
+    def _offline_lines(front_online: bool, rear_online: bool, blocked_nodes: str = None):
         """Return full-screen offline warning text when needed."""
         if front_online and rear_online:
             return None
+
+        if blocked_nodes:
+            if blocked_nodes == "F+R":
+                return ("!!! OFFLINE !!!", "CMD BLOCKED F+R")
+            if blocked_nodes == "F":
+                return ("!!! OFFLINE !!!", "CMD BLOCKED F  ")
+            if blocked_nodes == "R":
+                return ("!!! OFFLINE !!!", "CMD BLOCKED R  ")
 
         if not front_online and not rear_online:
             return ("!!! OFFLINE !!!", "FRONT+REAR DIFF")
@@ -192,9 +200,14 @@ class CentralStatusDisplay:
         rear_mode: str,
         front_online: bool,
         rear_online: bool,
+        blocked_nodes: str = None,
     ) -> None:
         """Render front/rear mode + online flags to the LCD."""
-        offline_lines = self._offline_lines(front_online, rear_online)
+        offline_lines = self._offline_lines(
+            front_online,
+            rear_online,
+            blocked_nodes=blocked_nodes,
+        )
         if offline_lines is not None:
             lines = offline_lines
             if lines == self._last_lines:

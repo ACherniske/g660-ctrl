@@ -55,6 +55,8 @@ class CentralModuleApp:
 
         self._last_heartbeat_ms = 0
         self._last_display_refresh_ms = 0
+        self._command_blocked_until_ms = 0
+        self._command_blocked_nodes = ""
         self._display = self._build_display()
 
     def _build_display(self):
@@ -106,10 +108,43 @@ class CentralModuleApp:
             return
 
         front_mode, rear_mode = preset
+        blocked_nodes = []
+
         if DifferentialMode.is_drive_mode(front_mode):
-            self._protocol.send_set_mode(NODE_ID_DIFF_FRONT, front_mode)
+            if self._diff_online[NODE_ID_DIFF_FRONT]:
+                self._protocol.send_set_mode(NODE_ID_DIFF_FRONT, front_mode)
+            else:
+                blocked_nodes.append("F")
+
         if DifferentialMode.is_drive_mode(rear_mode):
-            self._protocol.send_set_mode(NODE_ID_DIFF_REAR, rear_mode)
+            if self._diff_online[NODE_ID_DIFF_REAR]:
+                self._protocol.send_set_mode(NODE_ID_DIFF_REAR, rear_mode)
+            else:
+                blocked_nodes.append("R")
+
+        if blocked_nodes:
+            self._mark_command_blocked("+".join(blocked_nodes))
+
+    def _mark_command_blocked(self, blocked_nodes: str) -> None:
+        """Start temporary display indication for blocked preset commands."""
+        self._command_blocked_nodes = blocked_nodes
+        now = time.ticks_ms()
+        self._command_blocked_until_ms = time.ticks_add(
+            now,
+            config.COMMAND_BLOCKED_INDICATOR_MS,
+        )
+
+    def _active_blocked_nodes(self):
+        """Return active blocked-node indicator, if still within timeout."""
+        if not self._command_blocked_nodes:
+            return None
+
+        now = time.ticks_ms()
+        if time.ticks_diff(self._command_blocked_until_ms, now) <= 0:
+            self._command_blocked_nodes = ""
+            return None
+
+        return self._command_blocked_nodes
 
     def _poll_buttons(self) -> None:
         """Detect newly pressed preset buttons."""
@@ -189,6 +224,7 @@ class CentralModuleApp:
             rear_mode=self._diff_modes[NODE_ID_DIFF_REAR],
             front_online=self._diff_online[NODE_ID_DIFF_FRONT],
             rear_online=self._diff_online[NODE_ID_DIFF_REAR],
+            blocked_nodes=self._active_blocked_nodes(),
         )
 
     def step(self) -> None:

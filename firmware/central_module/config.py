@@ -9,6 +9,7 @@ from common.modes import DifferentialMode
 # Optional 2x16 I2C LCD status display
 DISPLAY_ENABLED = False
 DISPLAY_REFRESH_MS = 250
+COMMAND_BLOCKED_INDICATOR_MS = 1200
 
 BUTTON_PRESETS = {
     1: (DifferentialMode.NEUTRAL, DifferentialMode.NEUTRAL),
