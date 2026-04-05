@@ -8,7 +8,10 @@ This program runs on a diff controller board and does the following:
 """
 
 import time
+from machine import UART
 
+from common.constants import CMD_SET_MODE
+from common.protocol import SerialProtocol, byte_to_mode
 from hardware.mode_selector import DriveModeSelector
 from hardware.modes import DifferentialMode
 from hardware.motor_controller import MotorController
@@ -284,6 +287,14 @@ class DiffModuleMain:
             on_selection_change=self._on_selector_change,
         )
 
+        self._uart = UART(
+            pins.UART_ID,
+            baudrate=pins.UART_BAUDRATE,
+            tx=pins.UART_TX_PIN,
+            rx=pins.UART_RX_PIN,
+        )
+        self._protocol = SerialProtocol(self._uart, node_id=pins.NODE_ID)
+
     def _on_selector_change(self, selected_mode: str) -> None:
         """Queue selector mode requests."""
         if DifferentialMode.is_drive_mode(selected_mode):
@@ -296,6 +307,23 @@ class DiffModuleMain:
         """
         _ = mode
 
+    def _process_remote_commands(self) -> None:
+        """Handle inbound mode commands from the central module."""
+        messages = self._protocol.poll()
+        for message in messages:
+            if message["cmd"] != CMD_SET_MODE:
+                continue
+
+            payload = message["payload"]
+            if len(payload) != 1:
+                continue
+
+            requested_mode = byte_to_mode(payload[0])
+            if requested_mode is None:
+                continue
+
+            self.controller.queue_mode(requested_mode)
+
     def _on_fault(self, fault_code: str) -> None:
         """Handle movement fault conditions.
 
@@ -307,6 +335,7 @@ class DiffModuleMain:
         """Run forever."""
         while True:
             self.selector.update_all()
+            self._process_remote_commands()
             self.controller.step()
             time.sleep_ms(pins.MAIN_LOOP_DELAY_MS)
 

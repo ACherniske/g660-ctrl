@@ -1,0 +1,1 @@
+"""Central module application package."""
