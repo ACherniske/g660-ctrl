@@ -12,6 +12,7 @@ from common.constants import CMD_HEARTBEAT, CMD_SET_MODE, NODE_ID_CENTRAL
 from common.modes import DifferentialMode
 from common.protocol import SerialProtocol, byte_to_mode
 from common.switch_input import DiffModeButtons, DiffPositionSensors
+from diff_module.boot_state import BootStateStore
 from diff_module import pins
 from diff_module.mode_selector import ModeSelector as RequestModeSelector
 from diff_module.motor_controller import MotorController
@@ -29,6 +30,48 @@ class DiffModuleApp:
             raise ValueError(
                 "Invalid diff config: enable CENTRAL_CONTROL_ENABLED or LOCAL_SELECTOR_ENABLED."
             )
+
+        if pins.TRAVEL_TIMEOUT_MS <= 0:
+            raise ValueError("TRAVEL_TIMEOUT_MS must be > 0")
+
+        if pins.HEARTBEAT_WATCHDOG_TIMEOUT_MS <= 0:
+            raise ValueError("HEARTBEAT_WATCHDOG_TIMEOUT_MS must be > 0")
+
+        if pins.CENTRAL_REPLY_BASE_DELAY_MS < 0:
+            raise ValueError("CENTRAL_REPLY_BASE_DELAY_MS must be >= 0")
+
+        if pins.CENTRAL_REPLY_NODE_STEP_MS < 0:
+            raise ValueError("CENTRAL_REPLY_NODE_STEP_MS must be >= 0")
+
+        if pins.MAX_WATCHDOG_REBOOTS < 1:
+            raise ValueError("MAX_WATCHDOG_REBOOTS must be >= 1")
+
+        if pins.WATCHDOG_RECOVERY_HEARTBEAT_COUNT < 1:
+            raise ValueError("WATCHDOG_RECOVERY_HEARTBEAT_COUNT must be >= 1")
+
+        used_pins = [
+            pins.MOTOR_CW_PIN,
+            pins.MOTOR_CCW_PIN,
+            pins.POSITION_NEUTRAL_PIN,
+            pins.POSITION_LIMITED_SLIP_PIN,
+            pins.POSITION_LOCKED_PIN,
+            pins.NODE_SELECT_PIN,
+        ]
+
+        if pins.CENTRAL_CONTROL_ENABLED:
+            used_pins.extend([pins.UART_TX_PIN, pins.UART_RX_PIN])
+
+        if pins.LOCAL_SELECTOR_ENABLED:
+            used_pins.extend(
+                [
+                    pins.LOCAL_SELECTOR_NEUTRAL_PIN,
+                    pins.LOCAL_SELECTOR_LIMITED_SLIP_PIN,
+                    pins.LOCAL_SELECTOR_LOCKED_PIN,
+                ]
+            )
+
+        if len(used_pins) != len(set(used_pins)):
+            raise ValueError("Duplicate GPIO assignments detected in diff_module.pins")
 
     @staticmethod
     def _resolve_pull_mode(pull_setting: str) -> int:
@@ -106,9 +149,23 @@ class DiffModuleApp:
             )
             self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
 
+        self._boot_state = BootStateStore(path=pins.BOOT_STATE_FILE)
+        self._boot_info = self._boot_state.load()
+        self._watchdog_reset_count = self._boot_info["watchdog_reset_count"]
+        self._degraded_mode = (
+            pins.CENTRAL_CONTROL_ENABLED
+            and pins.HEARTBEAT_WATCHDOG_ENABLED
+            and self._watchdog_reset_count >= pins.MAX_WATCHDOG_REBOOTS
+        )
+        self._recovery_heartbeat_count = 0
+
         self._last_reported_sensor_mode = DifferentialMode.UNKNOWN
         self._last_central_heartbeat_ms = 0
         self._heartbeat_watchdog_armed = not pins.HEARTBEAT_WATCHDOG_REQUIRE_FIRST_HEARTBEAT
+
+        if self._degraded_mode:
+            self._transition.clear()
+            self._motor.stop()
 
     def _on_mode_request(self, _mode: str) -> None:
         """Optional hook for telemetry or status indicators."""
@@ -149,6 +206,35 @@ class DiffModuleApp:
         self._delay_before_reply_to_central(NODE_ID_CENTRAL)
         self._protocol.send_mode_status(NODE_ID_CENTRAL, mode)
 
+    @staticmethod
+    def _is_sensor_combo_valid(active_sensors: frozenset) -> bool:
+        """Return True for allowed sensor combinations.
+
+        Allowed:
+        - no active sensor
+        - one active sensor
+        - overlap pairs N/L or L/K
+        """
+        if len(active_sensors) <= 1:
+            return True
+
+        if len(active_sensors) != 2:
+            return False
+
+        if (
+            DifferentialMode.NEUTRAL in active_sensors
+            and DifferentialMode.LIMITED_SLIP in active_sensors
+        ):
+            return True
+
+        if (
+            DifferentialMode.LIMITED_SLIP in active_sensors
+            and DifferentialMode.LOCKED in active_sensors
+        ):
+            return True
+
+        return False
+
     def _handle_remote_commands(self) -> None:
         """Handle UART commands and queue mode requests."""
         if self._protocol is None:
@@ -159,6 +245,9 @@ class DiffModuleApp:
             cmd = message["cmd"]
 
             if cmd == CMD_SET_MODE:
+                if self._degraded_mode:
+                    continue
+
                 payload = message["payload"]
                 if len(payload) != 1:
                     continue
@@ -176,6 +265,7 @@ class DiffModuleApp:
                 if source_id == NODE_ID_CENTRAL:
                     self._last_central_heartbeat_ms = time.ticks_ms()
                     self._heartbeat_watchdog_armed = True
+                    self._handle_recovery_heartbeat()
 
                 self._delay_before_reply_to_central(source_id)
                 self._protocol.send_heartbeat(dst=source_id)
@@ -185,9 +275,26 @@ class DiffModuleApp:
                         mode=self._last_reported_sensor_mode,
                     )
 
+    def _handle_recovery_heartbeat(self) -> None:
+        """Count stable heartbeats to exit degraded mode safely."""
+        if not self._degraded_mode:
+            return
+
+        self._recovery_heartbeat_count += 1
+        if self._recovery_heartbeat_count < pins.WATCHDOG_RECOVERY_HEARTBEAT_COUNT:
+            return
+
+        self._degraded_mode = False
+        self._recovery_heartbeat_count = 0
+        self._watchdog_reset_count = 0
+        self._boot_state.clear_watchdog_reset_state()
+
     def _check_heartbeat_watchdog(self) -> None:
         """Reset module when central heartbeat is missing for too long."""
         if not pins.CENTRAL_CONTROL_ENABLED:
+            return
+
+        if self._degraded_mode:
             return
 
         if not pins.HEARTBEAT_WATCHDOG_ENABLED:
@@ -206,10 +313,14 @@ class DiffModuleApp:
 
         # Fail safe: stop outputs before reset.
         self._motor.stop()
+        self._boot_state.mark_watchdog_timeout_reset()
         machine.reset()
 
     def _handle_local_selector(self) -> None:
         """Queue mode requests from local selector buttons."""
+        if self._degraded_mode:
+            return
+
         if self._local_selector_mode is None:
             return
 
@@ -226,6 +337,19 @@ class DiffModuleApp:
         self._handle_local_selector()
 
         sensor_mode = self._position_mode.update()
+        active_sensors = self._position_inputs.get_active_switches()
+
+        if not self._is_sensor_combo_valid(active_sensors):
+            self._on_fault("sensor_invalid_combo")
+            self._transition.clear()
+            return
+
+        if self._degraded_mode:
+            self._transition.clear()
+            self._motor.stop()
+            self._check_heartbeat_watchdog()
+            return
+
         if (
             sensor_mode != self._last_reported_sensor_mode
             and DifferentialMode.is_drive_mode(sensor_mode)
@@ -234,7 +358,6 @@ class DiffModuleApp:
             if self._protocol is not None:
                 self._send_mode_status_to_central(sensor_mode)
 
-        active_sensors = self._position_inputs.get_active_switches()
         self._transition.step(sensor_mode, active_sensors=active_sensors)
         self._check_heartbeat_watchdog()
 

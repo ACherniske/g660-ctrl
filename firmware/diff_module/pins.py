@@ -65,5 +65,10 @@ HEARTBEAT_WATCHDOG_TIMEOUT_MS = DEFAULT_HEARTBEAT_TIMEOUT_MS
 # If True, watchdog starts only after first central heartbeat is received.
 HEARTBEAT_WATCHDOG_REQUIRE_FIRST_HEARTBEAT = True
 
+# Watchdog reboot-loop protection.
+BOOT_STATE_FILE = "diff_boot_state.json"
+MAX_WATCHDOG_REBOOTS = 3
+WATCHDOG_RECOVERY_HEARTBEAT_COUNT = 20
+
 # Main loop pacing
 MAIN_LOOP_DELAY_MS = 10

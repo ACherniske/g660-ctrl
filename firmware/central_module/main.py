@@ -27,7 +27,43 @@ from common.switch_input import SwitchCollection
 class CentralModuleApp:
     """Runtime application for central (steering-wheel) controller."""
 
+    @staticmethod
+    def _validate_configuration() -> None:
+        """Fail fast on invalid central config values."""
+        if config.STARTUP_GRACE_MS < 0:
+            raise ValueError("STARTUP_GRACE_MS must be >= 0")
+
+        if config.SET_MODE_ACK_TIMEOUT_MS <= 0:
+            raise ValueError("SET_MODE_ACK_TIMEOUT_MS must be > 0")
+
+        if config.SET_MODE_MAX_RETRIES < 1:
+            raise ValueError("SET_MODE_MAX_RETRIES must be >= 1")
+
+        if config.HEARTBEAT_STAGGER_MS < 0:
+            raise ValueError("HEARTBEAT_STAGGER_MS must be >= 0")
+
+        if config.HEARTBEAT_STAGGER_MS >= HEARTBEAT_INTERVAL_MS:
+            raise ValueError("HEARTBEAT_STAGGER_MS must be < HEARTBEAT_INTERVAL_MS")
+
+        if config.SET_MODE_INTERFRAME_GAP_MS < 0:
+            raise ValueError("SET_MODE_INTERFRAME_GAP_MS must be >= 0")
+
+        if config.DISPLAY_REFRESH_MS <= 0:
+            raise ValueError("DISPLAY_REFRESH_MS must be > 0")
+
+        button_pins = []
+        for button_id in range(1, 7):
+            pin_value = getattr(pins, "BUTTON_{}_PIN".format(button_id), None)
+            if pin_value is None:
+                continue
+            button_pins.append(pin_value)
+
+        if len(button_pins) != len(set(button_pins)):
+            raise ValueError("Duplicate BUTTON_n_PIN values are not allowed")
+
     def __init__(self) -> None:
+        self._validate_configuration()
+
         pull_mode = Pin.PULL_UP if pins.INPUT_PULL_UP else Pin.PULL_DOWN
 
         self._buttons = SwitchCollection()
