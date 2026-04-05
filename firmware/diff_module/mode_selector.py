@@ -103,3 +103,66 @@ class ModeSelector:
         """Clear pending and active mode requests."""
         self._request_queue = []
         self._active_target = None
+
+
+class InputModeResolver:
+    """Resolve an input bank's active switches into a mode value.
+
+    Args:
+        input_bank: Bank object supporting ``update_all()`` and
+            ``get_active_switches()``.
+    """
+
+    def __init__(self, input_bank) -> None:
+        self._input_bank = input_bank
+        self._current_mode = DifferentialMode.UNKNOWN
+        self._mode_changed = False
+
+    @property
+    def current_mode(self) -> str:
+        """Return latest resolved mode value."""
+        return self._current_mode
+
+    def pop_mode_changed(self) -> bool:
+        """Return whether mode changed since last pop."""
+        if not self._mode_changed:
+            return False
+        self._mode_changed = False
+        return True
+
+    def update(self) -> str:
+        """Poll input bank and resolve active switch combination."""
+        self._input_bank.update_all()
+        active = self._input_bank.get_active_switches()
+        next_mode = self._resolve_mode(active)
+
+        self._mode_changed = next_mode != self._current_mode
+        self._current_mode = next_mode
+        return next_mode
+
+    @staticmethod
+    def _resolve_mode(active_switches: frozenset) -> str:
+        """Map active switch names to differential mode strings."""
+        if len(active_switches) == 0:
+            return DifferentialMode.UNKNOWN
+
+        if len(active_switches) == 1:
+            mode = next(iter(active_switches))
+            if DifferentialMode.is_drive_mode(mode):
+                return mode
+            return DifferentialMode.INVALID
+
+        if len(active_switches) == 2:
+            if (
+                DifferentialMode.NEUTRAL in active_switches
+                and DifferentialMode.LIMITED_SLIP in active_switches
+            ):
+                return DifferentialMode.LIMITED_SLIP
+
+            if (
+                DifferentialMode.LIMITED_SLIP in active_switches
+                and DifferentialMode.LOCKED in active_switches
+            ):
+                return DifferentialMode.LIMITED_SLIP
+
+        return DifferentialMode.INVALID

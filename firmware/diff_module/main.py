@@ -14,10 +14,9 @@ from common.protocol import SerialProtocol, byte_to_mode
 from common.switch_input import DiffModeButtons, DiffPositionSensors
 from diff_module.boot_state import BootStateStore
 from diff_module import pins
-from diff_module.mode_selector import ModeSelector as RequestModeSelector
+from diff_module.mode_selector import InputModeResolver, ModeSelector as RequestModeSelector
 from diff_module.motor_controller import MotorController
 from diff_module.transition_controller import TransitionController
-from hardware.mode_selector import ModeSelector as InputModeResolver
 
 
 _FAULT_NONE = "fault_cleared"

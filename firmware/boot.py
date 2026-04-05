@@ -7,11 +7,11 @@ application or the differential-module application.
 from machine import Pin
 
 from common.constants import (
-	BOOT_HIGH_IS_CENTRAL,
-	BOOT_SELECT_PIN,
-	BOOT_SELECT_PULL,
-	CENTRAL_ENTRY_MODULE,
-	DIFF_ENTRY_MODULE,
+    BOOT_HIGH_IS_CENTRAL,
+    BOOT_SELECT_PIN,
+    BOOT_SELECT_PULL,
+    CENTRAL_ENTRY_MODULE,
+    DIFF_ENTRY_MODULE,
 )
 
 
