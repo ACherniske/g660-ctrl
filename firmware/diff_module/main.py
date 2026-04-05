@@ -1,0 +1,155 @@
+"""Diff module entry point.
+
+This app receives mode commands (local buttons and/or UART), drives motor
+transitions, and uses position sensors as the stop/completion authority.
+"""
+
+import time
+from machine import Pin, UART
+
+from common.constants import CMD_SET_MODE
+from common.modes import DifferentialMode
+from common.protocol import SerialProtocol, byte_to_mode
+from common.switch_input import DiffModeButtons, DiffPositionSensors
+from diff_module import pins
+from diff_module.mode_selector import ModeSelector as RequestModeSelector
+from diff_module.motor_controller import MotorController
+from diff_module.transition_controller import TransitionController
+from hardware.mode_selector import ModeSelector as InputModeResolver
+
+
+class DiffModuleApp:
+    """Runtime application for a single differential controller module."""
+
+    @staticmethod
+    def _resolve_pull_mode(pull_setting: str) -> int:
+        """Map pull setting string to machine Pin pull mode."""
+        if pull_setting == "down":
+            return Pin.PULL_DOWN
+        return Pin.PULL_UP
+
+    def _resolve_node_id(self) -> int:
+        """Resolve front/rear node ID from solder-jumper select pin."""
+        select_pin = Pin(
+            pins.NODE_SELECT_PIN,
+            Pin.IN,
+            self._resolve_pull_mode(pins.NODE_SELECT_PULL),
+        )
+        level_high = bool(select_pin.value())
+        is_front = level_high if pins.NODE_SELECT_HIGH_IS_FRONT else not level_high
+        return pins.NODE_ID_FRONT if is_front else pins.NODE_ID_REAR
+
+    def __init__(self) -> None:
+        pull_mode = Pin.PULL_UP if pins.INPUT_PULL_UP else Pin.PULL_DOWN
+        self._node_id = self._resolve_node_id()
+
+        self._motor = MotorController(
+            cw_pin=pins.MOTOR_CW_PIN,
+            ccw_pin=pins.MOTOR_CCW_PIN,
+        )
+
+        self._request_selector = RequestModeSelector(
+            on_mode_request=self._on_mode_request,
+            on_mode_applied=self._on_mode_applied,
+        )
+
+        self._transition = TransitionController(
+            mode_selector=self._request_selector,
+            motor=self._motor,
+            cw_increases_mode_index=pins.CW_INCREASES_MODE_INDEX,
+            travel_timeout_ms=pins.TRAVEL_TIMEOUT_MS,
+            on_fault=self._on_fault,
+        )
+
+        self._position_inputs = DiffPositionSensors(
+            input_a_pin=pins.POSITION_NEUTRAL_PIN,
+            input_b_pin=pins.POSITION_LIMITED_SLIP_PIN,
+            input_c_pin=pins.POSITION_LOCKED_PIN,
+            pull=pull_mode,
+            debounce_ms=pins.INPUT_DEBOUNCE_MS,
+            active_low=pins.INPUT_ACTIVE_LOW,
+        )
+        self._position_mode = InputModeResolver(input_bank=self._position_inputs)
+
+        self._local_selector = None
+        self._local_selector_mode = None
+        if pins.LOCAL_SELECTOR_ENABLED:
+            self._local_selector = DiffModeButtons(
+                input_a_pin=pins.LOCAL_SELECTOR_NEUTRAL_PIN,
+                input_b_pin=pins.LOCAL_SELECTOR_LIMITED_SLIP_PIN,
+                input_c_pin=pins.LOCAL_SELECTOR_LOCKED_PIN,
+                pull=pull_mode,
+                debounce_ms=pins.INPUT_DEBOUNCE_MS,
+                active_low=pins.INPUT_ACTIVE_LOW,
+            )
+            self._local_selector_mode = InputModeResolver(input_bank=self._local_selector)
+
+        self._uart = UART(
+            pins.UART_ID,
+            baudrate=pins.UART_BAUDRATE,
+            tx=pins.UART_TX_PIN,
+            rx=pins.UART_RX_PIN,
+        )
+        self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
+
+    def _on_mode_request(self, _mode: str) -> None:
+        """Optional hook for telemetry or status indicators."""
+
+    def _on_mode_applied(self, _mode: str) -> None:
+        """Optional hook for telemetry or status indicators."""
+
+    def _on_fault(self, _fault_code: str) -> None:
+        """Optional hook for telemetry or status indicators."""
+
+    def _handle_remote_commands(self) -> None:
+        """Handle UART commands and queue mode requests."""
+        for message in self._protocol.poll():
+            if message["cmd"] != CMD_SET_MODE:
+                continue
+
+            payload = message["payload"]
+            if len(payload) != 1:
+                continue
+
+            requested_mode = byte_to_mode(payload[0])
+            if requested_mode is None:
+                continue
+
+            self._transition.request_mode(requested_mode)
+
+    def _handle_local_selector(self) -> None:
+        """Queue mode requests from local selector buttons."""
+        if self._local_selector_mode is None:
+            return
+
+        selected_mode = self._local_selector_mode.update()
+        if not self._local_selector_mode.pop_mode_changed():
+            return
+
+        if DifferentialMode.is_drive_mode(selected_mode):
+            self._transition.request_mode(selected_mode)
+
+    def step(self) -> None:
+        """Run one control-loop cycle."""
+        self._handle_remote_commands()
+        self._handle_local_selector()
+
+        sensor_mode = self._position_mode.update()
+        active_sensors = self._position_inputs.get_active_switches()
+        self._transition.step(sensor_mode, active_sensors=active_sensors)
+
+    def run(self) -> None:
+        """Run forever."""
+        while True:
+            self.step()
+            time.sleep_ms(pins.MAIN_LOOP_DELAY_MS)
+
+
+def main() -> None:
+    """MicroPython entry point for diff module."""
+    app = DiffModuleApp()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
