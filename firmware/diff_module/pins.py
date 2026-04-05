@@ -1,6 +1,7 @@
 """Diff-module hardware and link pin configuration."""
 
 from common.constants import (
+	HEARTBEAT_TIMEOUT_MS as DEFAULT_HEARTBEAT_TIMEOUT_MS,
 	NODE_ID_DIFF_FRONT,
 	NODE_ID_DIFF_REAR,
 	UART_BAUDRATE as DEFAULT_UART_BAUDRATE,
@@ -44,6 +45,14 @@ UART_ID = 1
 UART_BAUDRATE = DEFAULT_UART_BAUDRATE
 UART_TX_PIN = 17
 UART_RX_PIN = 16
+
+# Optional comms-loss reset watchdog.
+# When enabled, this module will reset if central heartbeat is not seen
+# for longer than HEARTBEAT_WATCHDOG_TIMEOUT_MS.
+HEARTBEAT_WATCHDOG_ENABLED = True
+HEARTBEAT_WATCHDOG_TIMEOUT_MS = DEFAULT_HEARTBEAT_TIMEOUT_MS
+# If True, watchdog starts only after first central heartbeat is received.
+HEARTBEAT_WATCHDOG_REQUIRE_FIRST_HEARTBEAT = True
 
 # Main loop pacing
 MAIN_LOOP_DELAY_MS = 10

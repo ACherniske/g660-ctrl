@@ -5,6 +5,7 @@ transitions, and uses position sensors as the stop/completion authority.
 """
 
 import time
+import machine
 from machine import Pin, UART
 
 from common.constants import CMD_HEARTBEAT, CMD_SET_MODE, NODE_ID_CENTRAL
@@ -92,6 +93,8 @@ class DiffModuleApp:
         )
         self._protocol = SerialProtocol(self._uart, node_id=self._node_id)
         self._last_reported_sensor_mode = DifferentialMode.UNKNOWN
+        self._last_central_heartbeat_ms = 0
+        self._heartbeat_watchdog_armed = not pins.HEARTBEAT_WATCHDOG_REQUIRE_FIRST_HEARTBEAT
 
     def _on_mode_request(self, _mode: str) -> None:
         """Optional hook for telemetry or status indicators."""
@@ -106,7 +109,14 @@ class DiffModuleApp:
 
     def _handle_remote_commands(self) -> None:
         """Handle UART commands and queue mode requests."""
+        now = time.ticks_ms()
+
         for message in self._protocol.poll():
+            source_id = message["src"]
+            if source_id == NODE_ID_CENTRAL:
+                self._last_central_heartbeat_ms = now
+                self._heartbeat_watchdog_armed = True
+
             cmd = message["cmd"]
 
             if cmd == CMD_SET_MODE:
@@ -122,13 +132,32 @@ class DiffModuleApp:
                 continue
 
             if cmd == CMD_HEARTBEAT:
-                source_id = message["src"]
                 self._protocol.send_heartbeat(dst=source_id)
                 if DifferentialMode.is_drive_mode(self._last_reported_sensor_mode):
                     self._protocol.send_mode_status(
                         dst=source_id,
                         mode=self._last_reported_sensor_mode,
                     )
+
+    def _check_heartbeat_watchdog(self) -> None:
+        """Reset module when central heartbeat is missing for too long."""
+        if not pins.HEARTBEAT_WATCHDOG_ENABLED:
+            return
+
+        if not self._heartbeat_watchdog_armed:
+            return
+
+        if self._last_central_heartbeat_ms == 0:
+            return
+
+        now = time.ticks_ms()
+        elapsed = time.ticks_diff(now, self._last_central_heartbeat_ms)
+        if elapsed <= pins.HEARTBEAT_WATCHDOG_TIMEOUT_MS:
+            return
+
+        # Fail safe: stop outputs before reset.
+        self._motor.stop()
+        machine.reset()
 
     def _handle_local_selector(self) -> None:
         """Queue mode requests from local selector buttons."""
@@ -157,6 +186,7 @@ class DiffModuleApp:
 
         active_sensors = self._position_inputs.get_active_switches()
         self._transition.step(sensor_mode, active_sensors=active_sensors)
+        self._check_heartbeat_watchdog()
 
     def run(self) -> None:
         """Run forever."""
