@@ -427,6 +427,7 @@ class DiffModuleApp:
         if not self._is_sensor_combo_valid(active_sensors):
             self._on_fault("sensor_invalid_combo")
             self._transition.clear()
+            self._check_heartbeat_watchdog()
             return
         if self._active_fault == "sensor_invalid_combo":
             self._send_fault_to_central(_FAULT_NONE)
