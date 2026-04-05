@@ -172,6 +172,20 @@ class CentralStatusDisplay:
     def _online_token(online: bool) -> str:
         return "ON" if online else "OF"
 
+    @staticmethod
+    def _offline_lines(front_online: bool, rear_online: bool):
+        """Return full-screen offline warning text when needed."""
+        if front_online and rear_online:
+            return None
+
+        if not front_online and not rear_online:
+            return ("!!! OFFLINE !!!", "FRONT+REAR DIFF")
+
+        if not front_online:
+            return ("!!! OFFLINE !!!", "FRONT DIFF MOD")
+
+        return ("!!! OFFLINE !!!", "REAR DIFF MOD ")
+
     def update(
         self,
         front_mode: str,
@@ -180,6 +194,16 @@ class CentralStatusDisplay:
         rear_online: bool,
     ) -> None:
         """Render front/rear mode + online flags to the LCD."""
+        offline_lines = self._offline_lines(front_online, rear_online)
+        if offline_lines is not None:
+            lines = offline_lines
+            if lines == self._last_lines:
+                return
+
+            self._lcd.write_lines(lines[0], lines[1])
+            self._last_lines = lines
+            return
+
         line1 = "F:{} {}".format(self._mode_token(front_mode), self._online_token(front_online))
         line2 = "R:{} {}".format(self._mode_token(rear_mode), self._online_token(rear_online))
 
