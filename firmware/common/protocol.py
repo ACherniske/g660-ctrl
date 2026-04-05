@@ -9,6 +9,7 @@ CRC is XOR of all bytes from DST through payload.
 from common.modes import DifferentialMode
 
 from common.constants import (
+    CMD_ACK,
     CMD_SET_MODE,
     CMD_HEARTBEAT,
     CMD_MODE_STATUS,
@@ -129,6 +130,10 @@ class SerialProtocol:
     def send_heartbeat(self, dst: int = NODE_ID_BROADCAST) -> None:
         """Send a heartbeat frame to the specified destination (default broadcast)."""
         self.send_frame(dst=dst, cmd=CMD_HEARTBEAT)
+
+    def send_ack(self, dst: int, acked_cmd: int) -> None:
+        """Send one-byte command acknowledgment payload."""
+        self.send_frame(dst=dst, cmd=CMD_ACK, payload=bytes((acked_cmd & 0xFF,)))
 
     def poll(self):
         """Read UART and return list of parsed messages for this node."""

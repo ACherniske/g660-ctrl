@@ -11,6 +11,11 @@ DISPLAY_ENABLED = False
 DISPLAY_REFRESH_MS = 250
 COMMAND_BLOCKED_INDICATOR_MS = 1200
 
+# Startup/command reliability tuning
+STARTUP_GRACE_MS = 3000
+SET_MODE_ACK_TIMEOUT_MS = 300
+SET_MODE_MAX_RETRIES = 3
+
 BUTTON_PRESETS = {
     1: (DifferentialMode.NEUTRAL, DifferentialMode.NEUTRAL),
     2: (DifferentialMode.LIMITED_SLIP, DifferentialMode.LIMITED_SLIP),

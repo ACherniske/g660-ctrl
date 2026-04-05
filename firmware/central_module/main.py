@@ -10,7 +10,9 @@ from machine import I2C, Pin, UART
 from central_module import config, pins
 from central_module.display import CentralStatusDisplay, I2cBackpackLcd1602
 from common.constants import (
+    CMD_ACK,
     CMD_HEARTBEAT,
+    CMD_SET_MODE,
     CMD_MODE_STATUS,
     HEARTBEAT_INTERVAL_MS,
     HEARTBEAT_TIMEOUT_MS,
@@ -57,7 +59,28 @@ class CentralModuleApp:
         self._last_display_refresh_ms = 0
         self._command_blocked_until_ms = 0
         self._command_blocked_nodes = ""
+        self._startup_ms = time.ticks_ms()
+        self._pending_set_mode = {
+            NODE_ID_DIFF_FRONT: None,
+            NODE_ID_DIFF_REAR: None,
+        }
         self._display = self._build_display()
+
+    def _in_startup_grace(self) -> bool:
+        """Return True while central is inside startup grace window."""
+        elapsed = time.ticks_diff(time.ticks_ms(), self._startup_ms)
+        return elapsed < config.STARTUP_GRACE_MS
+
+    def _send_set_mode_with_tracking(self, node_id: int, mode: str) -> None:
+        """Send set-mode and start ACK wait/retry tracking."""
+        if not self._protocol.send_set_mode(node_id, mode):
+            return
+
+        self._pending_set_mode[node_id] = {
+            "mode": mode,
+            "attempts": 1,
+            "last_sent_ms": time.ticks_ms(),
+        }
 
     def _build_display(self):
         """Create optional LCD display wrapper if enabled in config."""
@@ -109,16 +132,17 @@ class CentralModuleApp:
 
         front_mode, rear_mode = preset
         blocked_nodes = []
+        startup_grace = self._in_startup_grace()
 
         if DifferentialMode.is_drive_mode(front_mode):
-            if self._diff_online[NODE_ID_DIFF_FRONT]:
-                self._protocol.send_set_mode(NODE_ID_DIFF_FRONT, front_mode)
+            if self._diff_online[NODE_ID_DIFF_FRONT] or startup_grace:
+                self._send_set_mode_with_tracking(NODE_ID_DIFF_FRONT, front_mode)
             else:
                 blocked_nodes.append("F")
 
         if DifferentialMode.is_drive_mode(rear_mode):
-            if self._diff_online[NODE_ID_DIFF_REAR]:
-                self._protocol.send_set_mode(NODE_ID_DIFF_REAR, rear_mode)
+            if self._diff_online[NODE_ID_DIFF_REAR] or startup_grace:
+                self._send_set_mode_with_tracking(NODE_ID_DIFF_REAR, rear_mode)
             else:
                 blocked_nodes.append("R")
 
@@ -171,6 +195,15 @@ class CentralModuleApp:
             self._diff_online[src] = True
 
             cmd = message["cmd"]
+            if cmd == CMD_ACK:
+                payload = message["payload"]
+                if len(payload) != 1:
+                    continue
+
+                if payload[0] == CMD_SET_MODE:
+                    self._pending_set_mode[src] = None
+                continue
+
             if cmd == CMD_MODE_STATUS:
                 payload = message["payload"]
                 if len(payload) != 1:
@@ -185,6 +218,36 @@ class CentralModuleApp:
 
             if cmd == CMD_HEARTBEAT:
                 continue
+
+    def _retry_pending_set_mode(self) -> None:
+        """Retry set-mode commands that have not been acknowledged yet."""
+        now = time.ticks_ms()
+
+        for node_id in (NODE_ID_DIFF_FRONT, NODE_ID_DIFF_REAR):
+            pending = self._pending_set_mode[node_id]
+            if pending is None:
+                continue
+
+            if not self._diff_online[node_id] and not self._in_startup_grace():
+                self._pending_set_mode[node_id] = None
+                self._mark_command_blocked("F" if node_id == NODE_ID_DIFF_FRONT else "R")
+                continue
+
+            elapsed = time.ticks_diff(now, pending["last_sent_ms"])
+            if elapsed < config.SET_MODE_ACK_TIMEOUT_MS:
+                continue
+
+            if pending["attempts"] >= config.SET_MODE_MAX_RETRIES:
+                self._pending_set_mode[node_id] = None
+                self._mark_command_blocked("F" if node_id == NODE_ID_DIFF_FRONT else "R")
+                continue
+
+            if not self._protocol.send_set_mode(node_id, pending["mode"]):
+                self._pending_set_mode[node_id] = None
+                continue
+
+            pending["attempts"] += 1
+            pending["last_sent_ms"] = now
 
     def _send_heartbeats(self) -> None:
         """Send periodic heartbeat to front and rear diff nodes."""
@@ -233,6 +296,7 @@ class CentralModuleApp:
         self._send_heartbeats()
         self._process_incoming()
         self._update_online_flags()
+        self._retry_pending_set_mode()
         self._update_display()
 
     def run(self) -> None:

@@ -143,6 +143,7 @@ class DiffModuleApp:
                     continue
 
                 self._transition.request_mode(requested_mode)
+                self._protocol.send_ack(dst=source_id, acked_cmd=CMD_SET_MODE)
                 continue
 
             if cmd == CMD_HEARTBEAT:
