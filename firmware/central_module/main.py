@@ -246,7 +246,7 @@ class CentralModuleApp:
             return None
 
         now = time.ticks_ms()
-        if time.ticks_diff(self._command_blocked_until_ms, now) <= 0:
+        if time.ticks_diff(now, self._command_blocked_until_ms) <= 0:
             self._command_blocked_nodes = ""
             return None
 

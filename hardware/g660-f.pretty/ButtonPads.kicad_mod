@@ -1,0 +1,123 @@
+(footprint "ButtonPads"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(descr "https://katalog.we-online.com/em/datasheet/434133025816.pdf")
+	(tags "tactile switch Wurth Wuerth")
+	(property "Reference" "REF**"
+		(at 0 -5.08 0)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "cad2284e-5d8e-419e-a167-d8e926a0fada")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "ButtonPads"
+		(at 0 2.55 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "8f958a62-1c06-4ea8-8622-a8d1af1df70a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "b4eaeacc-6c2e-4dc0-8dfe-b33c92faa19f")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "8ca5fa41-9f4e-4dfd-9603-afb749fd5892")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_line
+		(start -1.016 -4.092)
+		(end 0 -4.092)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "F.SilkS")
+		(uuid "e8003747-486b-434d-85f0-9e8236f884a8")
+	)
+	(fp_line
+		(start -1.016 -0.762)
+		(end -1.016 -4.092)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "F.SilkS")
+		(uuid "ce966a95-1082-4b35-b6df-50b5b7eee65b")
+	)
+	(fp_line
+		(start 1.016 -4.092)
+		(end 0 -4.092)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "F.SilkS")
+		(uuid "3c10df48-3497-4345-a488-f143aeddf083")
+	)
+	(fp_line
+		(start 1.016 -0.762)
+		(end 1.016 -4.092)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "F.SilkS")
+		(uuid "97a9a293-bf9f-4882-8212-c0d59aebe041")
+	)
+	(pad "1" smd rect
+		(at 0 -2.314 90)
+		(size 3 1.5)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "c6043b12-55d1-4c21-9cce-d5080c14de35")
+	)
+	(pad "2" smd rect
+		(at 0 2.258 90)
+		(size 3 1.5)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "90f8933d-c571-4abb-a5a2-7ec9d422fe6f")
+	)
+	(embedded_fonts no)
+	(model "${KICAD9_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_1P1T_NO_Vertical_Wuerth_434133025816.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

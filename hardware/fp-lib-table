@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "g660-f")(type "KiCad")(uri "${KIPRJMOD}/g660-f.pretty")(options "")(descr ""))
+)
