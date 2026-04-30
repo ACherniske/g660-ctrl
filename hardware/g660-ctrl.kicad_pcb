@@ -135,9 +135,9 @@
 			(subtractmaskfromsilk no)
 			(outputformat 1)
 			(mirror no)
-			(drillshape 1)
+			(drillshape 0)
 			(scaleselection 1)
-			(outputdirectory "")
+			(outputdirectory "../fabrication/")
 		)
 	)
 	(net 0 "")
@@ -1127,7 +1127,7 @@
 		(at 154.77 113.216 180)
 		(descr "https://katalog.we-online.com/em/datasheet/434133025816.pdf")
 		(tags "tactile switch Wurth Wuerth")
-		(property "Reference" "SW7"
+		(property "Reference" "BOOT"
 			(at 0.15 -3.429 0)
 			(layer "F.SilkS" knockout)
 			(uuid "503a031a-76fb-4e1d-aa22-773e0538839b")
@@ -2564,8 +2564,8 @@
 		(layer "F.Cu")
 		(uuid "3a5bbac4-bde7-49de-a3bb-6e25c16c3b9b")
 		(at 162.771 94.674 -90)
-		(property "Reference" "J8"
-			(at -0.127 2.286 -90)
+		(property "Reference" "DIFF POS"
+			(at -0.127 2.286 270)
 			(unlocked yes)
 			(layer "B.SilkS" knockout)
 			(uuid "fe8c6d31-72c8-421f-af56-0a302d0c69cf")
@@ -5064,7 +5064,7 @@
 		(layer "F.Cu")
 		(uuid "6a3ec917-7a48-4c44-a1f8-baea2ded9213")
 		(at 136.482 94.293 -90)
-		(property "Reference" "J5"
+		(property "Reference" "I2C"
 			(at 0 2.159 270)
 			(unlocked yes)
 			(layer "B.SilkS" knockout)
@@ -6993,8 +6993,8 @@
 		(layer "F.Cu")
 		(uuid "8d9212a1-8148-439d-b637-6c87dcb10098")
 		(at 143.721 85.149)
-		(property "Reference" "J6"
-			(at -1.27 3.60681 -90)
+		(property "Reference" "TX1"
+			(at -1.27 3.60681 270)
 			(unlocked yes)
 			(layer "B.SilkS" knockout)
 			(uuid "e6fef2ad-9aae-43f7-8af7-6a19f9e31dc7")
@@ -11683,7 +11683,7 @@
 		(at 141.27 113.216 180)
 		(descr "https://katalog.we-online.com/em/datasheet/434133025816.pdf")
 		(tags "tactile switch Wurth Wuerth")
-		(property "Reference" "SW8"
+		(property "Reference" "RST"
 			(at -0.038 -3.429 0)
 			(layer "F.SilkS" knockout)
 			(uuid "3c113b36-7253-4e0d-b3f5-c0253161204a")
